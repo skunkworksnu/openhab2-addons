@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2010-2017 by the respective copyright holders.
+s * Copyright (c) 2010-2017 by the respective copyright holders.
  *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -36,13 +36,8 @@ public class SynopAnalyzerHandlerFactory extends BaseThingHandlerFactory {
 
     @Override
     protected ThingHandler createHandler(Thing thing) {
-
         ThingTypeUID thingTypeUID = thing.getThingTypeUID();
 
-        if (thingTypeUID.equals(THING_SYNOP)) {
-            return new SynopAnalyzerHandler(thing);
-        }
-
-        return null;
+        return thingTypeUID.equals(THING_SYNOP) ? new SynopAnalyzerHandler(thing) : null;
     }
 }
