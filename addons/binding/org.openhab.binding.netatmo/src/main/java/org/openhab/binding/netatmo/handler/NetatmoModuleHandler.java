@@ -10,15 +10,18 @@ package org.openhab.binding.netatmo.handler;
 
 import static org.openhab.binding.netatmo.NetatmoBindingConstants.*;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+
 import org.eclipse.smarthome.core.library.types.OnOffType;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.eclipse.smarthome.core.thing.binding.ThingHandler;
 import org.eclipse.smarthome.core.types.RefreshType;
 import org.eclipse.smarthome.core.types.State;
-import org.openhab.binding.netatmo.config.NetatmoDeviceConfiguration;
-import org.openhab.binding.netatmo.config.NetatmoModuleConfiguration;
+import org.eclipse.smarthome.core.types.UnDefType;
+import org.openhab.binding.netatmo.config.NetatmoChildConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoParentConfiguration;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
-import org.openhab.binding.netatmo.internal.NAModuleAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,13 +32,13 @@ import org.slf4j.LoggerFactory;
  * @author Gaël L'hopital - Initial contribution OH2 version
  *
  */
-public abstract class NetatmoModuleHandler<X extends NetatmoModuleConfiguration>
-        extends AbstractNetatmoThingHandler<X> {
+public abstract class NetatmoModuleHandler<X extends NetatmoChildConfiguration, Y>
+        extends AbstractNetatmoThingHandler<X, Y> {
     private Logger logger = LoggerFactory.getLogger(NetatmoModuleHandler.class);
     private int batteryMin = 0;
     private int batteryLow = 0;
     private int batteryMax = 1;
-    protected NAModuleAdapter module;
+    protected Y module;
 
     protected NetatmoModuleHandler(Thing thing, Class<X> configurationClass) {
         super(thing, configurationClass);
@@ -47,59 +50,74 @@ public abstract class NetatmoModuleHandler<X extends NetatmoModuleConfiguration>
     }
 
     private void initializeBatteryLevels() {
-        try {
-            this.batteryMax = Integer.parseInt(getProperty(PROPERTY_BATTERY_MAX));
-            this.batteryMin = Integer.parseInt(getProperty(PROPERTY_BATTERY_MIN));
-            this.batteryLow = Integer.parseInt(getProperty(PROPERTY_BATTERY_LOW));
-        } catch (NumberFormatException e) {
-            logger.warn("Battery levels were not correctly initialised - reported values will be inconsistent");
-        }
+        this.batteryMax = getIntegerProperty(PROPERTY_BATTERY_MAX);
+        this.batteryMin = getIntegerProperty(PROPERTY_BATTERY_MIN);
+        this.batteryLow = getIntegerProperty(PROPERTY_BATTERY_LOW);
     }
 
     // when batteries are freshly changed, API may return a value superior to batteryMax !
-    private int getBatteryPercent() {
+    private int getBatteryPercent() throws NoSuchMethodException, SecurityException, IllegalAccessException,
+            IllegalArgumentException, InvocationTargetException {
         if (batteryMax == 1) {
             initializeBatteryLevels();
         }
 
-        int correctedVp = Math.min(module.getBatteryVp(), batteryMax);
+        Method getBatteryVp = module.getClass().getMethod("getBatteryVp");
+        Integer value = (Integer) getBatteryVp.invoke(module);
+
+        int correctedVp = Math.min(value.intValue(), batteryMax);
         return (100 * (correctedVp - batteryMin) / (batteryMax - batteryMin));
     }
 
     @Override
     protected State getNAThingProperty(String channelId) {
         if (module != null) {
-            switch (channelId) {
-                case CHANNEL_BATTERY_LEVEL:
-                    return ChannelTypeUtils.toDecimalType(getBatteryPercent());
-                case CHANNEL_LOW_BATTERY:
-                    return module.getBatteryVp() < batteryLow ? OnOffType.ON : OnOffType.OFF;
-                case CHANNEL_LAST_MESSAGE:
-                    return ChannelTypeUtils.toDateTimeType(module.getLastMessage());
-                case CHANNEL_RF_STATUS:
-                    Integer rfStatus = module.getRfStatus();
-                    return ChannelTypeUtils.toDecimalType(getSignalStrength(rfStatus));
+            try {
 
+                switch (channelId) {
+                    case CHANNEL_BATTERY_LEVEL:
+                        return ChannelTypeUtils.toDecimalType(getBatteryPercent());
+                    case CHANNEL_LOW_BATTERY:
+                        Method getBatteryVp;
+                        getBatteryVp = module.getClass().getMethod("getBatteryVp");
+
+                        Integer value = (Integer) getBatteryVp.invoke(module);
+                        return value.intValue() < batteryLow ? OnOffType.ON : OnOffType.OFF;
+                    case CHANNEL_LAST_MESSAGE:
+                        Method getLastMessage = module.getClass().getMethod("getLastMessage");
+                        Integer lastMessage = (Integer) getLastMessage.invoke(module);
+                        return ChannelTypeUtils.toDateTimeType(lastMessage);
+                    case CHANNEL_RF_STATUS:
+                        Method getRfStatus = module.getClass().getMethod("getRfStatus");
+                        Integer rfStatus = (Integer) getRfStatus.invoke(module);
+                        return ChannelTypeUtils.toDecimalType(getSignalStrength(rfStatus));
+
+                }
+            } catch (NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException
+                    | InvocationTargetException e) {
+                logger.error("The module has no method to access {} property ", channelId.toString());
+                return UnDefType.NULL;
             }
 
         }
         return super.getNAThingProperty(channelId);
     }
 
-    public void updateChannels(NAModuleAdapter module) {
-        this.module = module;
+    @SuppressWarnings("unchecked")
+    protected void updateChannels(Object module) {
+        this.module = (Y) module;
         super.updateChannels(configuration.getParentId());
     }
 
     protected void requestParentRefresh() {
-        logger.debug("Updating parent modules of {}", configuration.getEquipmentId());
+        logger.debug("Updating parent modules of {}", configuration.getId());
         for (Thing thing : getBridge().getThings()) {
             ThingHandler thingHandler = thing.getHandler();
             if (thingHandler instanceof NetatmoDeviceHandler) {
                 @SuppressWarnings("unchecked")
-                NetatmoDeviceHandler<NetatmoDeviceConfiguration> deviceHandler = (NetatmoDeviceHandler<NetatmoDeviceConfiguration>) thingHandler;
-                NetatmoDeviceConfiguration deviceConfiguration = deviceHandler.configuration;
-                if (deviceConfiguration.getEquipmentId().equalsIgnoreCase(configuration.getParentId())) {
+                NetatmoDeviceHandler<NetatmoParentConfiguration, ?> deviceHandler = (NetatmoDeviceHandler<NetatmoParentConfiguration, ?>) thingHandler;
+                NetatmoParentConfiguration deviceConfiguration = deviceHandler.configuration;
+                if (deviceConfiguration.getId().equalsIgnoreCase(configuration.getParentId())) {
                     // I'm your father Luke
                     thingHandler.handleCommand(null, RefreshType.REFRESH);
                 }

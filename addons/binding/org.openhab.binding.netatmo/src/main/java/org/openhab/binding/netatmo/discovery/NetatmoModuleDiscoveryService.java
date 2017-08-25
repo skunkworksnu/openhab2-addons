@@ -10,9 +10,12 @@ package org.openhab.binding.netatmo.discovery;
 
 import static org.openhab.binding.netatmo.NetatmoBindingConstants.*;
 
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.smarthome.config.discovery.AbstractDiscoveryService;
 import org.eclipse.smarthome.config.discovery.DiscoveryResult;
@@ -20,111 +23,164 @@ import org.eclipse.smarthome.config.discovery.DiscoveryResultBuilder;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.eclipse.smarthome.core.thing.ThingTypeUID;
 import org.eclipse.smarthome.core.thing.ThingUID;
-import org.openhab.binding.netatmo.config.NetatmoModuleConfiguration;
-import org.openhab.binding.netatmo.config.NetatmoThingConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoChildConfiguration;
 import org.openhab.binding.netatmo.handler.NetatmoBridgeHandler;
 import org.openhab.binding.netatmo.handler.NetatmoDeviceHandler;
 import org.openhab.binding.netatmo.handler.NetatmoModuleHandler;
-import org.openhab.binding.netatmo.internal.NADeviceAdapter;
-import org.openhab.binding.netatmo.internal.NAModuleAdapter;
-import org.openhab.binding.netatmo.internal.NAPlugAdapter;
-import org.openhab.binding.netatmo.internal.NAStationAdapter;
 
 import io.swagger.client.model.NAMain;
 import io.swagger.client.model.NAPlug;
 import io.swagger.client.model.NAStationDataBody;
+import io.swagger.client.model.NAStationModule;
+import io.swagger.client.model.NAThermostat;
 import io.swagger.client.model.NAThermostatDataBody;
+import io.swagger.client.model.NAWelcomeCameras;
+import io.swagger.client.model.NAWelcomeEvents;
+import io.swagger.client.model.NAWelcomeHomeData;
+import io.swagger.client.model.NAWelcomeHomes;
+import io.swagger.client.model.NAWelcomePersons;
 
 /**
  * The {@link NetatmoModuleDiscoveryService} searches for available Netatmo
  * devices and modules connected to the API console
  *
  * @author Gaël L'hopital - Initial contribution
+ * @author Ing. Peter Weiss - Welcome camera implementation
  *
  */
 public class NetatmoModuleDiscoveryService extends AbstractDiscoveryService {
     private static final int SEARCH_TIME = 2;
-    private NetatmoBridgeHandler netatmoBridgeHandler;
+
+    private Integer eventCount = 0;
+    private final NetatmoBridgeHandler netatmoBridgeHandler;
 
     public NetatmoModuleDiscoveryService(NetatmoBridgeHandler netatmoBridgeHandler) {
         super(SUPPORTED_DEVICE_THING_TYPES_UIDS, SEARCH_TIME);
         this.netatmoBridgeHandler = netatmoBridgeHandler;
     }
 
-    private void screenModules(NADeviceAdapter<?> device) {
-
-        Map<String, NAModuleAdapter> modules = device.getModules();
-        for (NAModuleAdapter naModule : modules.values()) {
-            onModuleAddedInternal(device.getId(), naModule);
-        }
-
-    }
-
     @Override
     public void startScan() {
+        // Discover station and modules
         NAStationDataBody stationsDataBody = netatmoBridgeHandler.getStationsDataBody(null);
         if (stationsDataBody != null) {
-            List<NAMain> stationDevices = stationsDataBody.getDevices();
-            for (NAMain device : stationDevices) {
-                NADeviceAdapter<NAMain> deviceAdapter = new NAStationAdapter(device);
-                onDeviceAddedInternal(deviceAdapter);
-                screenModules(deviceAdapter);
-            }
+            List<NAMain> stations = stationsDataBody.getDevices();
+            stations.forEach(station -> {
+                onDeviceAddedInternal(station.getId(), station.getType(), station.getStationName());
+                List<NAStationModule> modules = station.getModules();
+                modules.forEach(module -> {
+                    onModuleAddedInternal(station.getId(), module.getId(), module.getType(), module.getModuleName());
+                });
+            });
         }
-
+        // Discover plug and thermostats
         NAThermostatDataBody thermostatsDataBody = netatmoBridgeHandler.getThermostatsDataBody(null);
         if (thermostatsDataBody != null) {
-            List<NAPlug> thermostatDevices = thermostatsDataBody.getDevices();
-            for (NAPlug device : thermostatDevices) {
-                NADeviceAdapter<?> deviceAdapter = new NAPlugAdapter(device);
-                onDeviceAddedInternal(deviceAdapter);
-                screenModules(deviceAdapter);
+            List<NAPlug> plugs = thermostatsDataBody.getDevices();
+            plugs.forEach(plug -> {
+                onDeviceAddedInternal(plug.getId(), plug.getType(), plug.getStationName());
+                List<NAThermostat> thermostats = plug.getModules();
+                thermostats.forEach(thermostat -> {
+                    onModuleAddedInternal(plug.getId(), thermostat.getId(), thermostat.getType(),
+                            thermostat.getModuleName());
+                });
+            });
+        }
+        // Discover Homes
+        NAWelcomeHomeData welcomeHomeData = netatmoBridgeHandler.getWelcomeDataBody(null);
+        if (welcomeHomeData != null) {
+            eventCount = netatmoBridgeHandler.getWelcomeEventThings();
+            List<NAWelcomeHomes> homes = welcomeHomeData.getHomes();
+            if (homes != null) {
+                homes.forEach(home -> {
+                    onDeviceAddedInternal(home.getId(), WELCOME_HOME_THING_TYPE.getId().toString(), home.getName());
+                    // Discover Cameras
+                    List<NAWelcomeCameras> cameras = home.getCameras();
+                    cameras.forEach(camera -> {
+                        onModuleAddedInternal(home.getId(), camera.getId(), camera.getType(), camera.getName());
+                    });
+                    // Discover persons
+                    List<NAWelcomePersons> persons = home.getPersons();
+                    Collections.sort(persons, new Comparator<NAWelcomePersons>() {
+                        @Override
+                        public int compare(NAWelcomePersons s1, NAWelcomePersons s2) {
+                            return s2.getLastSeen().compareTo(s1.getLastSeen());
+                        }
+                    });
+
+                    final AtomicInteger countPerson = new AtomicInteger();
+                    persons.forEach(person -> {
+                        String personName = person.getPseudo();
+                        if (personName == null) {
+                            personName = "Unknown Person " + countPerson.incrementAndGet();
+                        }
+                        onModuleAddedInternal(home.getId(), person.getId(),
+                                WELCOME_PERSON_THING_TYPE.getId().toString(), personName);
+                    });
+                    // Discover Events
+                    List<NAWelcomeEvents> events = home.getEvents();
+                    Collections.sort(events, new Comparator<NAWelcomeEvents>() {
+                        @Override
+                        public int compare(NAWelcomeEvents s1, NAWelcomeEvents s2) {
+                            return s2.getTime().compareTo(s1.getTime());
+                        }
+                    });
+
+                    final AtomicInteger countEvent = new AtomicInteger();
+                    events.forEach(event -> {
+                        if (countEvent.get() <= eventCount) {
+                            String eventName = "Event " + countEvent.incrementAndGet();
+                            onModuleAddedInternal(home.getId(), event.getId(),
+                                    WELCOME_EVENT_THING_TYPE.getId().toString(), eventName);
+                        }
+                    });
+                });
             }
+
         }
 
         stopScan();
     }
 
-    private void onDeviceAddedInternal(NADeviceAdapter<?> naDevice) {
-        // Prevent for adding already known devices
-        for (Thing thing : netatmoBridgeHandler.getThing().getThings()) {
-            if (thing.getHandler() instanceof NetatmoDeviceHandler) {
-                NetatmoDeviceHandler<?> device = (NetatmoDeviceHandler<?>) thing.getHandler();
-                NetatmoThingConfiguration configuration = device.getConfiguration();
-                if (configuration.getEquipmentId().equalsIgnoreCase(naDevice.getId())) {
-                    return;
-                }
-            }
-        }
+    private void onDeviceAddedInternal(String id, String type, String name) {
+        // Prevent from adding already known devices
+        netatmoBridgeHandler.getThing().getThings().stream()
+                .filter(thing -> thing.getHandler() instanceof NetatmoDeviceHandler).forEach(thing -> {
+                    NetatmoDeviceHandler<?, ?> device = (NetatmoDeviceHandler<?, ?>) thing.getHandler();
+                    // NetatmoParentConfiguration configuration = device.getConfiguration();
+                    if (device.configuration.getId().equalsIgnoreCase(id)) {
+                        return;
+                    }
+                });
 
-        ThingUID thingUID = findThingUID(naDevice.getType(), naDevice.getId());
+        ThingUID thingUID = findThingUID(type, id);
         Map<String, Object> properties = new HashMap<>(1);
 
-        properties.put(EQUIPMENT_ID, naDevice.getId());
+        properties.put(EQUIPMENT_ID, id);
 
-        addDiscoveredThing(thingUID, properties, naDevice.getTypeName());
+        addDiscoveredThing(thingUID, properties, name);
     }
 
-    private void onModuleAddedInternal(String deviceId, NAModuleAdapter naModule) {
+    private void onModuleAddedInternal(String deviceId, String moduleId, String moduleType, String moduleName) {
         // Prevent for adding already known modules
         for (Thing thing : netatmoBridgeHandler.getThing().getThings()) {
             if (thing.getHandler() instanceof NetatmoModuleHandler) {
-                NetatmoModuleHandler<?> module = (NetatmoModuleHandler<?>) thing.getHandler();
-                NetatmoModuleConfiguration configuration = module.getConfiguration();
+                NetatmoModuleHandler<?, ?> module = (NetatmoModuleHandler<?, ?>) thing.getHandler();
+                NetatmoChildConfiguration configuration = module.configuration;
                 if (configuration.getParentId().equalsIgnoreCase(deviceId)
-                        && configuration.getEquipmentId().equalsIgnoreCase(naModule.getId())) {
+                        && module.configuration.getId().equalsIgnoreCase(moduleId)) {
                     return;
                 }
             }
         }
 
-        ThingUID thingUID = findThingUID(naModule.getType(), naModule.getId());
+        ThingUID thingUID = findThingUID(moduleType, moduleId);
         Map<String, Object> properties = new HashMap<>(2);
 
-        properties.put(EQUIPMENT_ID, naModule.getId());
+        properties.put(EQUIPMENT_ID, moduleId);
         properties.put(PARENT_ID, deviceId);
 
-        addDiscoveredThing(thingUID, properties, naModule.getModuleName());
+        addDiscoveredThing(thingUID, properties, moduleName);
     }
 
     private void addDiscoveredThing(ThingUID thingUID, Map<String, Object> properties, String displayLabel) {
@@ -145,7 +201,7 @@ public class NetatmoModuleDiscoveryService extends AbstractDiscoveryService {
             }
         }
 
-        throw new IllegalArgumentException("Unsupported device type discovered :" + thingType);
+        throw new IllegalArgumentException("Unsupported device type discovered : " + thingType);
     }
 
 }

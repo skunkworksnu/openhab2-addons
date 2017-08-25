@@ -14,6 +14,6 @@ package org.openhab.binding.netatmo.config;
  *
  * @author Gaël L'hopital - Initial contribution
  */
-public class NATherm1Configuration extends NetatmoModuleConfiguration {
+public class NATherm1Configuration extends NetatmoChildConfiguration {
     public Integer setpointDefaultDuration;
 }

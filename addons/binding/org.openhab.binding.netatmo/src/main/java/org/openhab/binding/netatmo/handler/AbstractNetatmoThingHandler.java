@@ -24,28 +24,31 @@ import org.eclipse.smarthome.core.types.Command;
 import org.eclipse.smarthome.core.types.RefreshType;
 import org.eclipse.smarthome.core.types.State;
 import org.eclipse.smarthome.core.types.UnDefType;
-import org.openhab.binding.netatmo.config.NetatmoThingConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoParentConfiguration;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.swagger.client.CollectionFormats.CSVParams;
 import io.swagger.client.model.NAMeasureResponse;
 
 /**
  * {@link AbstractNetatmoThingHandler} is the abstract class that handles
- * common behaviors of both Devices and Modules
+ * common behaviors of all netatmo things
  *
- * @author Gaël L'hopital - Initial contribution OH2 version
+ * @author Gaël L'hopital - Initial contribution
+ * @author Ing. Peter Weiss - Welcome camera implementation
  *
  */
-abstract class AbstractNetatmoThingHandler<X extends NetatmoThingConfiguration> extends BaseThingHandler {
-    private Logger logger = LoggerFactory.getLogger(AbstractNetatmoThingHandler.class);
-    private List<Integer> signalThresholds = null;
-    protected List<String> measuredChannels = new ArrayList<String>();
-    protected NAMeasureResponse measures = null;
+abstract class AbstractNetatmoThingHandler<X extends NetatmoParentConfiguration, Y> extends BaseThingHandler {
+    protected static Logger logger = LoggerFactory.getLogger(AbstractNetatmoThingHandler.class);
 
     final Class<X> configurationClass;
-    protected X configuration = null;
+    public X configuration = null;
+
+    private List<Integer> signalThresholds = null;
+    private List<String> measuredChannels = new ArrayList<>();
+    protected NAMeasureResponse measures = null;
 
     AbstractNetatmoThingHandler(Thing thing, Class<X> configurationClass) {
         super(thing);
@@ -54,29 +57,106 @@ abstract class AbstractNetatmoThingHandler<X extends NetatmoThingConfiguration> 
 
     @Override
     public void initialize() {
-
-        buildMeasurableChannelList();
-        configuration = getConfigAs(configurationClass);
-
+        configuration = this.getConfigAs(configurationClass);
+        // getThing().getChannels().forEach(channel -> addChannelToMeasures(channel.getUID()));
         super.initialize();
     }
 
-    private void buildMeasurableChannelList() {
-        List<Channel> channels = getThing().getChannels();
-        for (Channel channel : channels) {
-            addChannelToMeasures(channel.getUID());
+    /*
+     * If this channel value is provided as a measure, then add it
+     * in the getMeasure parameter list
+     */
+    protected void addChannelToMeasures(ChannelUID channelUID) {
+        if (MEASURABLE_CHANNELS.contains(channelUID.getId())) {
+            measuredChannels.add(channelUID.getId());
         }
     }
 
-    // Protects property loading from missing entries Issue 1137
-    String getProperty(String propertyName) {
-        final Map<String, String> properties = thing.getProperties();
-        if (properties.containsKey(propertyName)) {
-            return properties.get(propertyName);
+    /*
+     * If this channel value is provided as a measure, then delete
+     * it in the getMeasure parameter list
+     */
+    protected void removeChannelFromMeasures(ChannelUID channelUID) {
+        String channel = channelUID.getId();
+        measuredChannels.remove(channel);
+    }
+
+    protected CSVParams getMeasuresAsCsv() {
+        if (measuredChannels.size() > 0) {
+            return new CSVParams(measuredChannels);
         } else {
-            logger.warn("Unable to load property {}", propertyName);
             return null;
         }
+    }
+
+    protected Float getMeasureValue(String channelId) {
+        int index = measuredChannels.indexOf(channelId);
+        return (index != -1) ? measures.getBody().get(0).getValue().get(0).get(index) : null;
+    }
+
+    @Override
+    public void channelUnlinked(ChannelUID channelUID) {
+        super.channelUnlinked(channelUID);
+        removeChannelFromMeasures(channelUID);
+    }
+
+    @Override
+    public void channelLinked(ChannelUID channelUID) {
+        super.channelLinked(channelUID);
+        addChannelToMeasures(channelUID);
+    }
+
+    // Protects property loading from missing entries Issue 1137
+    protected String getProperty(String propertyName) {
+        final Map<String, String> properties = thing.getProperties();
+        String value = properties.get(propertyName);
+        if (value == null) {
+            logger.warn("Property named {} was not found", propertyName);
+        }
+        return value;
+    }
+
+    protected Integer getIntegerProperty(String propertyName) {
+        String value = getProperty(propertyName);
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            logger.warn("Invalid property {} value {}", propertyName, value);
+            return null;
+        }
+    }
+
+    protected void updateChannels(String equipmentId) {
+        logger.debug("Updating channels");
+
+        for (Channel channel : getThing().getChannels()) {
+
+            String channelId = channel.getUID().getId();
+            logger.debug("Updating channel {}", channelId);
+            State state = getNAThingProperty(channelId);
+            if (state != null) {
+                updateState(channel.getUID(), state);
+            }
+        }
+
+        updateStatus(ThingStatus.ONLINE);
+    }
+
+    public NetatmoBridgeHandler getBridgeHandler() {
+        return (NetatmoBridgeHandler) this.getBridge().getHandler();
+    }
+
+    @Override
+    public void handleCommand(ChannelUID channelUID, Command command) {
+        if (command == RefreshType.REFRESH) {
+            logger.debug("Refreshing {}", channelUID);
+            updateChannels(configuration.getId());
+        }
+    }
+
+    protected State getNAThingProperty(String channelId) {
+        return (measures != null) ? ChannelTypeUtils.toDecimalType(getMeasureValue(channelId)) : UnDefType.NULL;
+
     }
 
     private void initializeThresholds() {
@@ -92,8 +172,6 @@ abstract class AbstractNetatmoThingHandler<X extends NetatmoThingConfiguration> 
     }
 
     int getSignalStrength(int signalLevel) {
-        // Take in account #3995
-
         if (signalThresholds == null) {
             initializeThresholds();
         }
@@ -107,72 +185,8 @@ abstract class AbstractNetatmoThingHandler<X extends NetatmoThingConfiguration> 
         return level;
     }
 
-    protected State getNAThingProperty(String channelId) {
-        return (measures != null) ? ChannelTypeUtils.toDecimalType(getMeasureValue(channelId)) : UnDefType.NULL;
-
-    }
-
-    protected void updateChannels(String equipmentId) {
-        logger.debug("Updating device channels");
-
-        for (Channel channel : getThing().getChannels()) {
-            String channelId = channel.getUID().getId();
-            State state = getNAThingProperty(channelId);
-            updateState(channel.getUID(), state);
-        }
-
-        updateStatus(ThingStatus.ONLINE);
-    }
-
-    protected Float getMeasureValue(String channelId) {
-        int index = measuredChannels.indexOf(channelId);
-        return (index != -1) ? measures.getBody().get(0).getValue().get(0).get(index) : null;
-
-    }
-
-    @Override
-    public void channelLinked(ChannelUID channelUID) {
-        super.channelLinked(channelUID);
-        addChannelToMeasures(channelUID);
-    }
-
-    /*
-     * If this channel value is provided as a measure, then add it
-     * in the getMeasure parameter list
-     */
-    protected void addChannelToMeasures(ChannelUID channelUID) {
-        String channel = channelUID.getId();
-        if (MEASURABLE_CHANNELS.contains(channel)) {
-            if (measuredChannels.indexOf(channel) == -1) {
-                measuredChannels.add(channel);
-            }
-        }
-    }
-
-    @Override
-    public void channelUnlinked(ChannelUID channelUID) {
-        String channel = channelUID.getId();
-        if (MEASURABLE_CHANNELS.contains(channel)) {
-            if (measuredChannels.indexOf(channel) != -1) {
-                measuredChannels.remove(channel);
-            }
-        }
-    }
-
-    @Override
-    public void handleCommand(ChannelUID channelUID, Command command) {
-        if (command == RefreshType.REFRESH) {
-            logger.debug("Refreshing {}", channelUID);
-            updateChannels(configuration.getEquipmentId());
-        }
-    }
-
-    protected NetatmoBridgeHandler getBridgeHandler() {
-        return (NetatmoBridgeHandler) this.getBridge().getHandler();
-    }
-
-    public X getConfiguration() {
-        return configuration;
-    }
+    // protected String getVideoUrl_ee(String cameraID) {
+    // return videoUrl.get(cameraID);
+    // }
 
 }

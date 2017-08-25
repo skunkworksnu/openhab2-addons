@@ -10,6 +10,10 @@ package org.openhab.binding.netatmo.handler;
 
 import static org.openhab.binding.netatmo.NetatmoBindingConstants.*;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -20,27 +24,30 @@ import org.eclipse.smarthome.core.thing.ThingStatus;
 import org.eclipse.smarthome.core.thing.ThingStatusDetail;
 import org.eclipse.smarthome.core.thing.binding.ThingHandler;
 import org.eclipse.smarthome.core.types.State;
-import org.openhab.binding.netatmo.config.NetatmoDeviceConfiguration;
-import org.openhab.binding.netatmo.config.NetatmoModuleConfiguration;
+import org.eclipse.smarthome.core.types.UnDefType;
+import org.openhab.binding.netatmo.config.NetatmoChildConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoParentConfiguration;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
-import org.openhab.binding.netatmo.internal.NADeviceAdapter;
-import org.openhab.binding.netatmo.internal.NAModuleAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.swagger.client.model.NAPlace;
+import io.swagger.client.model.NAUserAdministrative;
 
 /**
  * {@link NetatmoDeviceHandler} is the handler for a given
  * device accessed through the Netatmo Bridge
  *
  * @author Gaël L'hopital - Initial contribution OH2 version
+ * @author Ing. Peter Weiss
  *
  */
-public abstract class NetatmoDeviceHandler<X extends NetatmoDeviceConfiguration>
-        extends AbstractNetatmoThingHandler<X> {
+public abstract class NetatmoDeviceHandler<X extends NetatmoParentConfiguration, Y extends Object>
+        extends AbstractNetatmoThingHandler<X, Y> {
 
-    protected NADeviceAdapter<?> device;
+    protected Y device;
+    protected NAUserAdministrative userAdministrative;
+    protected Map<String, Object> childs = new HashMap<>();
     private Logger logger = LoggerFactory.getLogger(NetatmoDeviceHandler.class);
     private ScheduledFuture<?> refreshJob;
 
@@ -53,23 +60,23 @@ public abstract class NetatmoDeviceHandler<X extends NetatmoDeviceConfiguration>
         super.initialize();
 
         if (getBridge() != null) {
-            logger.debug("Initializing Netatmo Device '{}'", configuration.getEquipmentId());
+            logger.debug("Initializing Netatmo Device with id '{}'", this.getClass().toString(), configuration.getId());
             if (getBridge().getStatus() == ThingStatus.ONLINE) {
-                logger.debug("setting device '{}' online", configuration.getEquipmentId());
+                logger.debug("setting device '{}' online", configuration.getId());
                 updateStatus(ThingStatus.ONLINE);
                 logger.debug("scheduling update channel thread to run every {} ms", configuration.refreshInterval);
                 refreshJob = scheduler.scheduleWithFixedDelay(new Runnable() {
                     @Override
                     public void run() {
-                        updateChannels(configuration.getEquipmentId());
+                        updateChannels(configuration.getId());
                     }
-                }, 1, configuration.refreshInterval, TimeUnit.MILLISECONDS);
+                }, 1, configuration.refreshInterval.longValue(), TimeUnit.MILLISECONDS);
             } else {
-                logger.debug("setting device '{}' offline (bridge or thing offline)", configuration.getEquipmentId());
+                logger.debug("setting device '{}' offline (bridge or thing offline)", configuration.getId());
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.OFFLINE.BRIDGE_OFFLINE);
             }
         } else {
-            logger.debug("setting device '{}' offline (bridge == null)", configuration.getEquipmentId());
+            logger.debug("setting device '{}' offline (bridge == null)", configuration.getId());
             updateStatus(ThingStatus.OFFLINE);
         }
     }
@@ -83,13 +90,14 @@ public abstract class NetatmoDeviceHandler<X extends NetatmoDeviceConfiguration>
         }
     }
 
-    protected abstract NADeviceAdapter<?> updateReadings(String equipmentId);
+    protected abstract Y updateReadings(String equipmentId);
 
     @Override
     protected void updateChannels(String equipmentId) {
         logger.debug("Trying to update channels on device {}", equipmentId);
+        childs.clear();
         try {
-            NADeviceAdapter<?> tmpDevice = updateReadings(equipmentId);
+            Y tmpDevice = updateReadings(equipmentId);
             if (tmpDevice != null) {
                 logger.debug("Successfully updated device readings! Now updating channels");
                 this.device = tmpDevice;
@@ -97,31 +105,42 @@ public abstract class NetatmoDeviceHandler<X extends NetatmoDeviceConfiguration>
                 updateChildModules(equipmentId);
             }
         } catch (Exception e) {
-            logger.error("Exception when trying to update channels: {}", e.getMessage());
+            logger.error("Exception when trying to update channels: {} on equipment {}", e.getMessage(), equipmentId);
         }
     }
 
     @Override
     protected State getNAThingProperty(String channelId) {
-        switch (channelId) {
-            case CHANNEL_LAST_STATUS_STORE:
-                return ChannelTypeUtils.toDateTimeType(device.getLastStatusStore());
-            case CHANNEL_LOCATION:
-                NAPlace place = device.getPlace();
-                PointType point = new PointType(new DecimalType(place.getLocation().get(1)),
-                        new DecimalType(place.getLocation().get(0)));
-                if (place.getAltitude() != null) {
-                    point.setAltitude(new DecimalType(place.getAltitude()));
-                }
-                return point;
-            case CHANNEL_WIFI_STATUS:
-                Integer wifiStatus = device.getWifiStatus();
-                return new DecimalType(getSignalStrength(wifiStatus));
-            case CHANNEL_UNIT:
-                return new DecimalType(device.getUserAdministrative().getUnit());
-            default:
-                return super.getNAThingProperty(channelId);
+        try {
+            switch (channelId) {
+                case CHANNEL_LAST_STATUS_STORE:
+                    Method getLastStatusStore = device.getClass().getMethod("getLastStatusStore");
+                    Integer lastStatusStore = (Integer) getLastStatusStore.invoke(device);
+                    return ChannelTypeUtils.toDateTimeType(lastStatusStore);
+                case CHANNEL_LOCATION:
+                    Method getPlace = device.getClass().getMethod("getPlace");
+                    NAPlace place = (NAPlace) getPlace.invoke(device);
+                    PointType point = new PointType(new DecimalType(place.getLocation().get(1)),
+                            new DecimalType(place.getLocation().get(0)));
+                    if (place.getAltitude() != null) {
+                        point.setAltitude(new DecimalType(place.getAltitude()));
+                    }
+                    return point;
+                case CHANNEL_WIFI_STATUS:
+                    Method getWifiStatus = device.getClass().getMethod("getWifiStatus");
+                    Integer wifiStatus = (Integer) getWifiStatus.invoke(device);
+                    return new DecimalType(getSignalStrength(wifiStatus));
+                case CHANNEL_UNIT:
+                    return new DecimalType(userAdministrative.getUnit());
+                default:
+                    return super.getNAThingProperty(channelId);
+            }
+        } catch (NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException
+                | InvocationTargetException e) {
+            logger.error("The device has no method to access {} property ", channelId.toString());
+            return UnDefType.NULL;
         }
+
     }
 
     private void updateChildModules(String equipmentId) {
@@ -130,14 +149,18 @@ public abstract class NetatmoDeviceHandler<X extends NetatmoDeviceConfiguration>
             ThingHandler thingHandler = handler.getHandler();
             if (thingHandler instanceof NetatmoModuleHandler) {
                 @SuppressWarnings("unchecked")
-                NetatmoModuleHandler<NetatmoModuleConfiguration> moduleHandler = (NetatmoModuleHandler<NetatmoModuleConfiguration>) thingHandler;
-                NetatmoModuleConfiguration moduleConfiguration = moduleHandler.configuration;
+                NetatmoModuleHandler<NetatmoChildConfiguration, ?> moduleHandler = (NetatmoModuleHandler<NetatmoChildConfiguration, ?>) thingHandler;
+                NetatmoChildConfiguration moduleConfiguration = moduleHandler.configuration;
                 String parentId = moduleConfiguration.getParentId();
                 if (equipmentId.equalsIgnoreCase(parentId)) {
-                    String childId = moduleHandler.configuration.getEquipmentId();
-                    NAModuleAdapter module = device.getModules().get(childId);
-                    logger.debug("Updating child module {}", childId);
-                    moduleHandler.updateChannels(module);
+                    String childId = moduleHandler.configuration.getId();
+                    Object childValue = childs.get(childId);
+                    if (childValue != null) {
+                        logger.debug("Updating child module {}", childId);
+                        moduleHandler.updateChannels(childValue);
+                    } else {
+                        logger.error("Child was not found in Netatmo answer for parent {} child {}", parentId, childId);
+                    }
                 }
             }
         }

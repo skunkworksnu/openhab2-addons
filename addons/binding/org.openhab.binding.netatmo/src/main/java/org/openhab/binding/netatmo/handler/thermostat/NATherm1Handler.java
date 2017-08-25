@@ -27,7 +27,6 @@ import org.eclipse.smarthome.core.types.UnDefType;
 import org.openhab.binding.netatmo.config.NATherm1Configuration;
 import org.openhab.binding.netatmo.handler.NetatmoModuleHandler;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
-import org.openhab.binding.netatmo.internal.NAModuleAdapter;
 
 import io.swagger.client.CollectionFormats.CSVParams;
 import io.swagger.client.api.ThermostatApi;
@@ -42,61 +41,55 @@ import io.swagger.client.model.NATimeTableItem;
  * @author Gaël L'hopital - Initial contribution OH2 version
  *
  */
-public class NATherm1Handler extends NetatmoModuleHandler<NATherm1Configuration> {
+public class NATherm1Handler extends NetatmoModuleHandler<NATherm1Configuration, NAThermostat> {
 
     public NATherm1Handler(Thing thing) {
         super(thing, NATherm1Configuration.class);
-
     }
 
     @Override
-    public void updateChannels(NAModuleAdapter module) {
-        if (measuredChannels.size() > 0) {
+    public void updateChannels(Object module) {
+        CSVParams csvParams = getMeasuresAsCsv();
+        if (csvParams != null) {
             ThermostatApi thermostatApi = getBridgeHandler().getThermostatApi();
-            String parentId = configuration.getParentId();
-            String moduleId = module.getId();
-            CSVParams csvParams = new CSVParams(measuredChannels);
-            measures = thermostatApi.getmeasure(parentId, "max", csvParams, moduleId, null, null, 1, true, true);
+            measures = thermostatApi.getmeasure(configuration.getParentId(), "max", csvParams, configuration.getId(),
+                    null, null, 1, true, true);
         }
         super.updateChannels(module);
     }
 
     @Override
     protected State getNAThingProperty(String channelId) {
-
         if (module != null) {
-            NAThermostat thermostat = module.getThermostat();
-            if (thermostat != null) {
-                switch (channelId) {
-                    case CHANNEL_THERM_ORIENTATION:
-                        return new DecimalType(thermostat.getThermOrientation());
-                    case CHANNEL_THERM_RELAY:
-                        return thermostat.getThermRelayCmd() == 100 ? OnOffType.ON : OnOffType.OFF;
-                    case CHANNEL_TEMPERATURE:
-                        return ChannelTypeUtils.toDecimalType(thermostat.getMeasured().getTemperature());
-                    case CHANNEL_SETPOINT_TEMP:
-                        return ChannelTypeUtils.toDecimalType(thermostat.getMeasured().getSetpointTemp());
-                    case CHANNEL_TIMEUTC:
-                        return ChannelTypeUtils.toDateTimeType(thermostat.getMeasured().getTime());
-                    case CHANNEL_SETPOINT_END_TIME: {
-                        if (thermostat.getSetpoint() == null) {
-                            return UnDefType.NULL;
-                        }
-
-                        Integer endTime = thermostat.getSetpoint().getSetpointEndtime();
-                        if (endTime != null) {
-                            return ChannelTypeUtils.toDateTimeType(endTime);
-                        } else {
-                            return ChannelTypeUtils.toDateTimeType(getNextSchedule(thermostat.getThermProgramList()));
-                        }
-
+            switch (channelId) {
+                case CHANNEL_THERM_ORIENTATION:
+                    return new DecimalType(module.getThermOrientation());
+                case CHANNEL_THERM_RELAY:
+                    return module.getThermRelayCmd() == 100 ? OnOffType.ON : OnOffType.OFF;
+                case CHANNEL_TEMPERATURE:
+                    return ChannelTypeUtils.toDecimalType(module.getMeasured().getTemperature());
+                case CHANNEL_SETPOINT_TEMP:
+                    return ChannelTypeUtils.toDecimalType(module.getMeasured().getSetpointTemp());
+                case CHANNEL_TIMEUTC:
+                    return ChannelTypeUtils.toDateTimeType(module.getMeasured().getTime());
+                case CHANNEL_SETPOINT_END_TIME: {
+                    if (module.getSetpoint() == null) {
+                        return UnDefType.NULL;
                     }
-                    case CHANNEL_SETPOINT_MODE: {
-                        return thermostat.getSetpoint() != null
-                                ? new StringType(thermostat.getSetpoint().getSetpointMode()) : UnDefType.NULL;
+
+                    Integer endTime = module.getSetpoint().getSetpointEndtime();
+                    if (endTime != null) {
+                        return ChannelTypeUtils.toDateTimeType(endTime);
+                    } else {
+                        return ChannelTypeUtils.toDateTimeType(getNextSchedule(module.getThermProgramList()));
                     }
 
                 }
+                case CHANNEL_SETPOINT_MODE: {
+                    return module.getSetpoint() != null ? new StringType(module.getSetpoint().getSetpointMode())
+                            : UnDefType.NULL;
+                }
+
             }
         }
         return super.getNAThingProperty(channelId);
@@ -142,7 +135,7 @@ public class NATherm1Handler extends NetatmoModuleHandler<NATherm1Configuration>
                 switch (channelUID.getId()) {
                     case CHANNEL_SETPOINT_MODE: {
                         getBridgeHandler().getThermostatApi().setthermpoint(configuration.getParentId(),
-                                configuration.getEquipmentId(), command.toString(), null, null);
+                                configuration.getId(), command.toString(), null, null);
 
                         updateState(channelUID, new StringType(command.toString()));
                         requestParentRefresh();
@@ -153,7 +146,7 @@ public class NATherm1Handler extends NetatmoModuleHandler<NATherm1Configuration>
                         Calendar cal = Calendar.getInstance();
                         cal.add(Calendar.MINUTE, configuration.setpointDefaultDuration);
                         getBridgeHandler().getThermostatApi().setthermpoint(configuration.getParentId(),
-                                configuration.getEquipmentId(), "manual", (int) (cal.getTimeInMillis() / 1000),
+                                configuration.getId(), "manual", (int) (cal.getTimeInMillis() / 1000),
                                 Float.parseFloat(command.toString()));
                         updateState(channelUID, new DecimalType(command.toString()));
                         requestParentRefresh();

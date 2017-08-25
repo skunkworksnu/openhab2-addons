@@ -13,15 +13,14 @@ import static org.openhab.binding.netatmo.NetatmoBindingConstants.*;
 import org.eclipse.smarthome.core.library.types.DecimalType;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.eclipse.smarthome.core.types.State;
-import org.openhab.binding.netatmo.config.NetatmoDeviceConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoParentConfiguration;
 import org.openhab.binding.netatmo.handler.NetatmoDeviceHandler;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
-import org.openhab.binding.netatmo.internal.NADeviceAdapter;
-import org.openhab.binding.netatmo.internal.NAStationAdapter;
 
 import io.swagger.client.model.NADashboardData;
+import io.swagger.client.model.NAMain;
 import io.swagger.client.model.NAStationDataBody;
-import io.swagger.client.model.NAUserAdministrative;
+import io.swagger.client.model.NAStationModule;
 
 /**
  * {@link NAMainHandler} is the base class for all current Netatmo
@@ -30,27 +29,30 @@ import io.swagger.client.model.NAUserAdministrative;
  * @author Gaël L'hopital - Initial contribution OH2 version
  *
  */
-public class NAMainHandler extends NetatmoDeviceHandler<NetatmoDeviceConfiguration> {
+public class NAMainHandler extends NetatmoDeviceHandler<NetatmoParentConfiguration, NAMain> {
 
     public NAMainHandler(Thing thing) {
-        super(thing, NetatmoDeviceConfiguration.class);
+        super(thing, NetatmoParentConfiguration.class);
     }
 
     @Override
-    protected NADeviceAdapter<?> updateReadings(String equipmentId) {
+    protected NAMain updateReadings(String equipmentId) {
         NAStationDataBody stationDataBody = getBridgeHandler().getStationsDataBody(equipmentId);
         if (stationDataBody != null) {
-            return new NAStationAdapter(stationDataBody);
-        } else {
-            return null;
+            userAdministrative = stationDataBody.getUser().getAdministrative();
+            for (NAStationModule module : stationDataBody.getDevices().get(0).getModules()) {
+                childs.put(module.getId(), module);
+            }
+            // currently this code makes the assumption that the user
+            // only have one station
+            return stationDataBody.getDevices().get(0);
         }
+        return null;
     }
 
     @Override
     protected State getNAThingProperty(String channelId) {
-        NAStationAdapter stationAdapter = (NAStationAdapter) device;
-        NADashboardData dashboardData = stationAdapter.getDashboardData();
-        NAUserAdministrative userAdministrative = device.getUserAdministrative();
+        NADashboardData dashboardData = device.getDashboardData();
         switch (channelId) {
             case CHANNEL_CO2:
                 return ChannelTypeUtils.toDecimalType(dashboardData.getCO2());

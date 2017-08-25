@@ -13,11 +13,12 @@ import static org.openhab.binding.netatmo.NetatmoBindingConstants.*;
 import org.eclipse.smarthome.core.library.types.StringType;
 import org.eclipse.smarthome.core.thing.Thing;
 import org.eclipse.smarthome.core.types.State;
-import org.openhab.binding.netatmo.config.NetatmoModuleConfiguration;
+import org.openhab.binding.netatmo.config.NetatmoChildConfiguration;
 import org.openhab.binding.netatmo.handler.NetatmoModuleHandler;
 import org.openhab.binding.netatmo.internal.ChannelTypeUtils;
 
 import io.swagger.client.model.NADashboardData;
+import io.swagger.client.model.NAStationModule;
 
 /**
  * {@link NAModule1Handler} is the class used to handle the outdoor module
@@ -26,10 +27,10 @@ import io.swagger.client.model.NADashboardData;
  * @author Gaël L'hopital - Initial contribution OH2 version
  *
  */
-public class NAModule1Handler extends NetatmoModuleHandler<NetatmoModuleConfiguration> {
+public class NAModule1Handler extends NetatmoModuleHandler<NetatmoChildConfiguration, NAStationModule> {
 
     public NAModule1Handler(Thing thing) {
-        super(thing, NetatmoModuleConfiguration.class);
+        super(thing, NetatmoChildConfiguration.class);
     }
 
     @Override

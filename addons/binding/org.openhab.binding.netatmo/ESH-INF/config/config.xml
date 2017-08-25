@@ -6,31 +6,27 @@
         http://eclipse.org/smarthome/schemas/config-description-1.0.0.xsd">
 
     <config-description uri="thing-type:netatmo:bridge">                         
-        <parameter name="clientId" type="text">
+        <parameter name="clientId" type="text" required="true">
             <label>Client ID</label>
             <description>Client ID provided for the application you created on http://dev.netatmo.com/createapp</description>
-            <required>true</required>
             <advanced>false</advanced>
         </parameter>
             
-        <parameter name="clientSecret" type="text">
+        <parameter name="clientSecret" type="text" required="true">
             <label>Client Secret</label>
             <description>Client Secret provided for the application you created</description>
-            <required>true</required>
             <advanced>false</advanced>
         </parameter>
             
-        <parameter name="username" type="text">
+        <parameter name="username" type="text" required="true">
             <label>Username</label>
             <description>Your Netatmo API username (email)</description>
-            <required>true</required>
             <advanced>false</advanced>
         </parameter>
             
-        <parameter name="password" type="text">
+        <parameter name="password" type="text" required="true">
             <label>Password</label>
             <description>Your Netatmo API password</description>
-            <required>true</required>
             <advanced>false</advanced>
             <context>password</context>
         </parameter>            
@@ -46,11 +42,31 @@
             <description>Read and Write thermostat's data.</description>
             <default>true</default>
         </parameter>
+        
+        <parameter name="readWelcome" type="boolean" required="true">
+            <label>Access Welcome camera</label>
+            <description>Read, Access and write welcome camera's data.</description>
+            <default>false</default>
+        </parameter>
+        
+        <parameter name="welcomeEventThings" type="integer" required="false">
+            <label>Generate Thing Events</label>
+            <description>How many things for events should be generated (for Welcome Cameras).</description>
+            <default>5</default>
+            <advanced>true</advanced>
+        </parameter>
+
+        <parameter name="welcomeUnknownPersonThings" type="integer" required="false">
+            <label>Generate Thing Unknown Persons</label>
+            <description>How many things for unknown Persons should be generated (for Welcome Cameras)</description>
+            <default>3</default>
+            <advanced>true</advanced>
+        </parameter>
                                                          
     </config-description>
-
+    
     <config-description uri="thing-type:netatmo:device">
-        <parameter name="equipmentId" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
+        <parameter name="id" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
             <label>Equipment ID</label>
             <description>Id of the Device (mac address)</description>
             <required>true</required>
@@ -65,7 +81,7 @@
     </config-description>                 
     
     <config-description uri="thing-type:netatmo:module">
-        <parameter name="equipmentId" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
+        <parameter name="id" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
             <label>Module ID</label>
             <description>Id of the Module</description>
             <required>true</required>
@@ -79,7 +95,7 @@
     </config-description>     
     
     <config-description uri="thing-type:netatmo:natherm1">
-        <parameter name="equipmentId" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
+        <parameter name="id" type="text" pattern="\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}:\p{XDigit}{2}">
             <label>Module ID</label>
             <description>Id of the Module</description>
             <required>true</required>
@@ -97,6 +113,35 @@
             <default>60</default>
             <advanced>true</advanced>
         </parameter>   
-    </config-description>  
+    </config-description>
+    
+    <config-description uri="thing-type:netatmo:welcomehome">
+        <parameter name="id" type="text" required="true">
+            <label>Home ID</label>
+            <description>Id of the home</description>
+        </parameter>
+
+        <parameter name="welcomeEventThings" type="integer" required="false">
+            <label>Generate Thing Events</label>
+            <description>How many things for events should be generated.</description>
+            <default>5</default>
+            <advanced>true</advanced>
+        </parameter>
+
+        <parameter name="welcomeUnknownPersonThings" type="integer" required="false">
+            <label>Generate Thing Unknown Persons</label>
+            <description>How many things for unknown Persons should be generated</description>
+            <default>3</default>
+            <advanced>true</advanced>
+        </parameter>
+
+        <parameter name="refreshInterval" type="integer" required="false">
+            <label>Refresh Interval</label>
+            <description>The refresh interval to poll Netatmo API (in ms).</description>
+            <default>300000</default>
+            <advanced>true</advanced>
+        </parameter>
+    </config-description>
+  
 
 </config-description:config-descriptions>

@@ -13,12 +13,19 @@ package org.openhab.binding.netatmo.config;
  * configuration informations needed to access Netatmo API
  *
  * @author Gaël L'hopital - Initial contribution
+ * @author Ing. Peter Weiss - Welcome camera implementation
  */
 public class NetatmoBridgeConfiguration {
+
     public String clientId;
     public String clientSecret;
     public String username;
     public String password;
+
     public Boolean readStation;
     public Boolean readThermostat;
+    public Boolean readWelcome;
+
+    public Integer welcomeEventThings;
+    public Integer welcomeUnknownPersonThings;
 }
